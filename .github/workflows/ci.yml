@@ -25,9 +25,9 @@ jobs:
         run: npm ci
       - name: Type-check workspaces
         run: npm run check
-      - name: Run tests
-        run: npm test
       - name: Build packages and fixtures
         run: npm run build
+      - name: Run tests
+        run: npm test
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
