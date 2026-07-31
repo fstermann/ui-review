@@ -16,12 +16,14 @@ const excludedResponseHeaders = new Set(["connection", "content-length", "set-co
 /** HTTP and WebSocket proxy that injects the review client into HTML responses. */
 export class UpstreamProxy {
   readonly #appId: string;
+  readonly #basePath: string;
   readonly #includeHash: boolean;
   readonly #target: URL;
   readonly #webSocketProxy = HttpProxy.createProxyServer({ changeOrigin: true, ws: true });
 
-  public constructor(target: URL, appId: string, includeHash: boolean) {
+  public constructor(target: URL, appId: string, includeHash: boolean, basePath = "") {
     this.#appId = appId;
+    this.#basePath = basePath;
     this.#includeHash = includeHash;
     this.#target = target;
     this.#webSocketProxy.on("error", (_error, _request, socket) => {
@@ -71,6 +73,7 @@ export class UpstreamProxy {
     if (isHtml) {
       const body = injectReviewClient(await upstreamResponse.text(), {
         appId: this.#appId,
+        basePath: this.#basePath,
         includeHash: this.#includeHash,
         ...(nonce === undefined ? {} : { nonce }),
       });

@@ -14,9 +14,25 @@ import {
 const apiPrefix = "/__ui_review";
 const maxScreenshotBytes = 8_000_000;
 
+/** Strip the configured base path from a request pathname so route matching is prefix-agnostic.
+ *
+ * The overlay addresses the API at ``<basePath>/__ui_review/...`` so the browser keeps the reverse
+ * proxy's sub-path. Some proxies strip that prefix before forwarding and some don't, so we accept
+ * either: drop a leading ``basePath`` when present, then match the bare ``/__ui_review`` routes. */
+export function stripBasePath(pathname: string, basePath: string): string {
+  if (basePath === "" || pathname === basePath) {
+    return basePath === "" ? pathname : "/";
+  }
+  if (!pathname.startsWith(`${basePath}/`)) {
+    return pathname;
+  }
+  return pathname.slice(basePath.length);
+}
+
 /** Same-origin REST and event-stream interface used by the injected overlay. */
 export class ReviewApi {
   readonly #attachments: ScreenshotAttachmentStore;
+  readonly #basePath: string;
   readonly #browserBundle: Buffer;
   readonly #store: ReviewEventStore;
 
@@ -24,20 +40,26 @@ export class ReviewApi {
     store: ReviewEventStore,
     attachments: ScreenshotAttachmentStore,
     browserBundle: Buffer,
+    basePath = "",
   ) {
     this.#store = store;
     this.#attachments = attachments;
     this.#browserBundle = browserBundle;
+    this.#basePath = basePath;
   }
 
   /** Handle a reserved UI Review request and report whether it was consumed. */
   public async handle(request: IncomingMessage, response: ServerResponse, url: URL): Promise<boolean> {
-    if (!url.pathname.startsWith(apiPrefix)) {
+    const routedPathname = stripBasePath(url.pathname, this.#basePath);
+    if (!routedPathname.startsWith(apiPrefix)) {
       return false;
     }
+    // Route against a base-path-stripped copy so the reserved-route matching below is unchanged.
+    const routedUrl = new URL(url.href);
+    routedUrl.pathname = routedPathname;
 
     try {
-      await this.#route(request, response, url);
+      await this.#route(request, response, routedUrl);
     } catch (error: unknown) {
       if (response.headersSent) {
         response.end();

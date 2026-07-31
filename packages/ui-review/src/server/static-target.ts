@@ -54,6 +54,7 @@ export async function serveStaticTarget(
   target: StaticTarget,
   appId: string,
   includeHash: boolean,
+  basePath = "",
 ): Promise<void> {
   if (request.method !== "GET" && request.method !== "HEAD") {
     response.writeHead(405, { allow: "GET, HEAD" });
@@ -62,7 +63,12 @@ export async function serveStaticTarget(
   }
 
   const requestUrl = new URL(request.url ?? "/", "http://ui-review.local");
-  const decodedPath = decodeURIComponent(requestUrl.pathname);
+  // Drop the reverse-proxy sub-path when present so a prefixed asset request still resolves to the
+  // right file (proxies that already strip it leave the pathname unchanged).
+  const rawPath = decodeURIComponent(requestUrl.pathname);
+  const decodedPath = basePath !== "" && (rawPath === basePath || rawPath.startsWith(`${basePath}/`))
+    ? rawPath.slice(basePath.length) || "/"
+    : rawPath;
   const requestedFile = decodedPath === "/"
     ? target.entryFile
     : resolve(target.rootDirectory, `.${decodedPath}`);
@@ -80,7 +86,7 @@ export async function serveStaticTarget(
   const contentType = contentTypes[extension] ?? "application/octet-stream";
   const rawBody = await readFile(resolvedFile);
   const body = extension === ".html"
-    ? Buffer.from(injectReviewClient(rawBody.toString("utf8"), { appId, includeHash }), "utf8")
+    ? Buffer.from(injectReviewClient(rawBody.toString("utf8"), { appId, basePath, includeHash }), "utf8")
     : rawBody;
 
   response.writeHead(200, {

@@ -131,8 +131,8 @@ class ReviewOverlay {
   }> = [];
   #toastTimer: number | undefined;
 
-  public constructor(host: HTMLDivElement, appId: string, includeHash: boolean, nonce: string) {
-    this.#api = new ReviewApiClient(appId);
+  public constructor(host: HTMLDivElement, appId: string, includeHash: boolean, nonce: string, basePath = "") {
+    this.#api = new ReviewApiClient(appId, basePath);
     this.#appId = appId;
     this.#includeHash = includeHash;
     this.#currentPage = currentPageUrl(window.location, includeHash);
@@ -1729,16 +1729,17 @@ async function copyText(text: string): Promise<void> {
 }
 
 if (!document.querySelector("[data-ui-review-root]")) {
-  const reviewScript = document.querySelector<HTMLScriptElement>("script[data-ui-review-app][src^='/__ui_review/browser.js']");
+  const reviewScript = document.querySelector<HTMLScriptElement>("script[data-ui-review-app][src$='/__ui_review/browser.js']");
   const appId = reviewScript?.dataset.uiReviewApp;
   if (appId === undefined || appId.length === 0) {
     throw new Error("UI Review app identity is missing from the injected browser script");
   }
   const includeHash = reviewScript?.dataset.uiReviewIncludeHash === "true";
+  const basePath = reviewScript?.dataset.uiReviewBasePath ?? "";
   const nonce = reviewScript?.nonce ?? "";
   const host = document.createElement("div");
   host.dataset.uiReviewRoot = "";
   document.body.append(host);
-  const overlay = new ReviewOverlay(host, appId, includeHash, nonce);
+  const overlay = new ReviewOverlay(host, appId, includeHash, nonce, basePath);
   void overlay.start();
 }

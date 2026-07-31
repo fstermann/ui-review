@@ -12,6 +12,7 @@ import { UpstreamProxy } from "./upstream-proxy.js";
 
 export type ReviewServerOptions = {
   readonly appId?: string;
+  readonly basePath?: string;
   readonly host?: string;
   readonly includeHash?: boolean;
   readonly port?: number;
@@ -26,7 +27,13 @@ export type RunningReviewServer = {
 };
 
 type ResolvedTarget =
-  | { readonly appId: string; readonly includeHash: boolean; readonly kind: "static"; readonly target: StaticTarget }
+  | {
+      readonly appId: string;
+      readonly basePath: string;
+      readonly includeHash: boolean;
+      readonly kind: "static";
+      readonly target: StaticTarget;
+    }
   | { readonly kind: "upstream"; readonly proxy: UpstreamProxy };
 
 /** Start the local review proxy, annotation API, and event stream. */
@@ -37,13 +44,14 @@ export async function startReviewServer(options: ReviewServerOptions): Promise<R
   const store = new ReviewEventStore(options.projectRoot);
   const attachments = new ScreenshotAttachmentStore(options.projectRoot);
   await Promise.all([store.initialize(), attachments.initialize()]);
-  const api = new ReviewApi(store, attachments, browserBundle);
+  const basePath = options.basePath ?? "";
+  const api = new ReviewApi(store, attachments, browserBundle, basePath);
   const appId = options.appId ?? defaultAppId(options.target);
   const includeHash = options.includeHash ?? false;
-  const target = await resolveTarget(options.target, appId, includeHash);
+  const target = await resolveTarget(options.target, appId, includeHash, basePath);
 
   const server = createServer((request, response) => {
-    void handleRequest(request, response, api, target);
+    void handleRequest(request, response, api, target, basePath);
   });
   if (target.kind === "upstream") {
     server.on("upgrade", (request, socket, head) => {
@@ -89,9 +97,18 @@ async function handleRequest(
   response: ServerResponse,
   api: ReviewApi,
   target: ResolvedTarget,
+  basePath: string,
 ): Promise<void> {
   try {
     const requestUrl = new URL(request.url ?? "/", "http://ui-review.local");
+    // Reaching the sub-path without a trailing slash (".../ports/4317") makes the browser resolve
+    // the app's relative URLs against the parent path, dropping the last segment. Redirect to the
+    // canonical ".../ports/4317/" so relative asset and API requests keep the full base path.
+    if (basePath !== "" && requestUrl.pathname === basePath) {
+      response.writeHead(301, { location: `${basePath}/${requestUrl.search}` });
+      response.end();
+      return;
+    }
     if (await api.handle(request, response, requestUrl)) {
       return;
     }
@@ -99,7 +116,7 @@ async function handleRequest(
       await target.proxy.handle(request, response);
       return;
     }
-    await serveStaticTarget(request, response, target.target, target.appId, target.includeHash);
+    await serveStaticTarget(request, response, target.target, target.appId, target.includeHash, target.basePath);
   } catch (error: unknown) {
     if (response.headersSent) {
       response.end();
@@ -111,11 +128,16 @@ async function handleRequest(
   }
 }
 
-async function resolveTarget(target: string, appId: string, includeHash: boolean): Promise<ResolvedTarget> {
+async function resolveTarget(
+  target: string,
+  appId: string,
+  includeHash: boolean,
+  basePath: string,
+): Promise<ResolvedTarget> {
   if (target.startsWith("http://") || target.startsWith("https://")) {
-    return { kind: "upstream", proxy: new UpstreamProxy(new URL(target), appId, includeHash) };
+    return { kind: "upstream", proxy: new UpstreamProxy(new URL(target), appId, includeHash, basePath) };
   }
-  return { appId, includeHash, kind: "static", target: await resolveStaticTarget(target) };
+  return { appId, basePath, includeHash, kind: "static", target: await resolveStaticTarget(target) };
 }
 
 function defaultAppId(target: string): string {
