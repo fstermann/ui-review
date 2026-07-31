@@ -6,7 +6,7 @@ import type {
   UpdateAnnotationInput,
 } from "../shared/types.js";
 
-const apiPrefix = "/__ui_review";
+const apiSuffix = "/__ui_review";
 
 type AnnotationResponse = {
   readonly annotation: Annotation;
@@ -23,9 +23,13 @@ type ScreenshotResponse = {
 /** Browser-side client for annotations, replies, statuses, and live changes. */
 export class ReviewApiClient {
   readonly #appId: string;
+  readonly #apiPrefix: string;
 
-  public constructor(appId: string) {
+  public constructor(appId: string, basePath = "") {
     this.#appId = appId;
+    // Prefix every API/asset URL with the reverse-proxy sub-path so requests keep it and reach the
+    // review server (empty for direct origin-root access).
+    this.#apiPrefix = `${basePath}${apiSuffix}`;
   }
 
   /** List annotations for this application, optionally limited to one page URL. */
@@ -34,13 +38,13 @@ export class ReviewApiClient {
     if (pageUrl !== undefined) {
       query.set("pageUrl", pageUrl);
     }
-    const response = await requestJson<AnnotationListResponse>(`${apiPrefix}/annotations?${query.toString()}`);
+    const response = await requestJson<AnnotationListResponse>(`${this.#apiPrefix}/annotations?${query.toString()}`);
     return response.annotations;
   }
 
   /** Persist a new visual annotation. */
   public async create(input: CreateAnnotationInput): Promise<Annotation> {
-    const response = await requestJson<AnnotationResponse>(`${apiPrefix}/annotations`, {
+    const response = await requestJson<AnnotationResponse>(`${this.#apiPrefix}/annotations`, {
       body: JSON.stringify(input),
       headers: { "content-type": "application/json" },
       method: "POST",
@@ -51,7 +55,7 @@ export class ReviewApiClient {
   /** Edit the initial comment or move an annotation to a new visual target. */
   public async update(annotationId: string, input: UpdateAnnotationInput): Promise<Annotation> {
     const response = await requestJson<AnnotationResponse>(
-      `${apiPrefix}/annotations/${encodeURIComponent(annotationId)}`,
+      `${this.#apiPrefix}/annotations/${encodeURIComponent(annotationId)}`,
       {
         body: JSON.stringify(input),
         headers: { "content-type": "application/json" },
@@ -66,7 +70,7 @@ export class ReviewApiClient {
     file: File,
     dimensions: { readonly height: number; readonly width: number },
   ): Promise<ScreenshotAttachment> {
-    const response = await requestJson<ScreenshotResponse>(`${apiPrefix}/screenshots`, {
+    const response = await requestJson<ScreenshotResponse>(`${this.#apiPrefix}/screenshots`, {
       body: file,
       headers: {
         "content-type": file.type,
@@ -81,13 +85,13 @@ export class ReviewApiClient {
 
   /** Return the same-origin URL for a persisted screenshot. */
   public screenshotUrl(attachmentId: string): string {
-    return `${apiPrefix}/screenshots/${encodeURIComponent(attachmentId)}`;
+    return `${this.#apiPrefix}/screenshots/${encodeURIComponent(attachmentId)}`;
   }
 
   /** Add a human reply to an annotation thread. */
   public async reply(annotationId: string, text: string): Promise<Annotation> {
     const response = await requestJson<AnnotationResponse>(
-      `${apiPrefix}/annotations/${encodeURIComponent(annotationId)}/messages`,
+      `${this.#apiPrefix}/annotations/${encodeURIComponent(annotationId)}/messages`,
       {
         body: JSON.stringify({ text }),
         headers: { "content-type": "application/json" },
@@ -100,7 +104,7 @@ export class ReviewApiClient {
   /** Change an annotation lifecycle status. */
   public async setStatus(annotationId: string, status: AnnotationStatus): Promise<Annotation> {
     const response = await requestJson<AnnotationResponse>(
-      `${apiPrefix}/annotations/${encodeURIComponent(annotationId)}/status`,
+      `${this.#apiPrefix}/annotations/${encodeURIComponent(annotationId)}/status`,
       {
         body: JSON.stringify({ status }),
         headers: { "content-type": "application/json" },
@@ -112,7 +116,7 @@ export class ReviewApiClient {
 
   /** Delete an annotation from the current folded review state. */
   public async delete(annotationId: string): Promise<void> {
-    await requestJson<undefined>(`${apiPrefix}/annotations/${encodeURIComponent(annotationId)}`, {
+    await requestJson<undefined>(`${this.#apiPrefix}/annotations/${encodeURIComponent(annotationId)}`, {
       method: "DELETE",
     });
   }
@@ -120,7 +124,7 @@ export class ReviewApiClient {
   /** Subscribe to changes written by either the browser or an MCP agent process. */
   public subscribe(onChange: () => void): () => void {
     const query = new URLSearchParams({ appId: this.#appId });
-    const events = new EventSource(`${apiPrefix}/events?${query.toString()}`);
+    const events = new EventSource(`${this.#apiPrefix}/events?${query.toString()}`);
     events.addEventListener("change", onChange);
     return () => events.close();
   }

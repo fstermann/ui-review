@@ -30,4 +30,22 @@ describe("injectReviewClient", () => {
 
     expect(injectReviewClient(once, { appId: "second", includeHash: false })).toBe(once);
   });
+
+  it("prefixes the script src and records the base path when hosted under a sub-path", () => {
+    const output = injectReviewClient("<body></body>", {
+      appId: "dashboard",
+      basePath: "/codeeditor/default/ports/4317",
+      includeHash: false,
+    });
+
+    expect(output).toContain('src="/codeeditor/default/ports/4317/__ui_review/browser.js"');
+    expect(output).toContain('data-ui-review-base-path="/codeeditor/default/ports/4317"');
+  });
+
+  it("omits the base-path attribute at the origin root", () => {
+    const output = injectReviewClient("<body></body>", { appId: "dashboard", basePath: "", includeHash: false });
+
+    expect(output).toContain('src="/__ui_review/browser.js"');
+    expect(output).not.toContain("data-ui-review-base-path");
+  });
 });

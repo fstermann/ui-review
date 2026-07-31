@@ -9,6 +9,7 @@ import { uiReviewVersion } from "./shared/version.js";
 
 type ServeArguments = {
   readonly appId?: string;
+  readonly basePath: string;
   readonly command: "serve";
   readonly host: string;
   readonly includeHash: boolean;
@@ -28,13 +29,18 @@ const usage = `
 UI Review — local visual feedback for coding agents
 
 Usage:
-  ui-review <url-or-path> [--app <name>] [--include-hash] [--port 4317] [--host 127.0.0.1] [--root <path>]
+  ui-review <url-or-path> [--app <name>] [--include-hash] [--port 4317] [--host 127.0.0.1] [--root <path>] [--base-path <prefix>]
   ui-review mcp [--root <path>]
 
 Examples:
   ui-review http://127.0.0.1:5173
   ui-review ./dist/index.html --app marketing-site --port 4317
+  ui-review http://127.0.0.1:5173 --base-path /codeeditor/default/ports/4317
   ui-review mcp --root .
+
+--base-path prefixes the injected overlay's asset and API URLs so UI Review works when it is
+reached through a reverse proxy that serves it under a sub-path (e.g. SageMaker code-editor's
+/ports/<port>/ forward). Leave it unset for direct 127.0.0.1:<port> access.
 `.trim();
 
 /** Run the UI Review command-line interface. */
@@ -56,6 +62,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
   const runningServer = await startReviewServer({
     ...(parsed.appId === undefined ? {} : { appId: parsed.appId }),
+    basePath: parsed.basePath,
     host: parsed.host,
     includeHash: parsed.includeHash,
     port: parsed.port,
@@ -89,6 +96,7 @@ export function parseArguments(argv: readonly string[]): CliArguments {
   let port = 4317;
   let projectRoot = defaultProjectRoot();
   let appId: string | undefined;
+  let basePath = "";
   const positionals: string[] = [];
 
   for (let index = 0; index < values.length; index += 1) {
@@ -100,7 +108,13 @@ export function parseArguments(argv: readonly string[]): CliArguments {
       includeHash = true;
       continue;
     }
-    if (argument === "--app" || argument === "--host" || argument === "--port" || argument === "--root") {
+    if (
+      argument === "--app" ||
+      argument === "--host" ||
+      argument === "--port" ||
+      argument === "--root" ||
+      argument === "--base-path"
+    ) {
       const value = values[index + 1];
       if (value === undefined) {
         throw new Error(`Missing value for ${argument}\n\n${usage}`);
@@ -115,6 +129,8 @@ export function parseArguments(argv: readonly string[]): CliArguments {
         host = value;
       } else if (argument === "--root") {
         projectRoot = resolve(value);
+      } else if (argument === "--base-path") {
+        basePath = normalizeBasePath(value);
       } else {
         const parsedPort = Number.parseInt(value, 10);
         if (!Number.isInteger(parsedPort) || parsedPort < 0 || parsedPort > 65_535) {
@@ -143,6 +159,7 @@ export function parseArguments(argv: readonly string[]): CliArguments {
   }
   return {
     ...(appId === undefined ? {} : { appId }),
+    basePath,
     command: "serve",
     host,
     includeHash,
@@ -150,6 +167,19 @@ export function parseArguments(argv: readonly string[]): CliArguments {
     projectRoot,
     target,
   };
+}
+
+/** Normalize a base-path prefix to a leading slash and no trailing slash ("" when empty/root).
+ *
+ * Accepts the value with or without a leading slash and tolerates a trailing one, so
+ * "/codeeditor/default/ports/4317", "codeeditor/.../4317/" and "/" all normalize predictably. */
+export function normalizeBasePath(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "" || trimmed === "/") {
+    return "";
+  }
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  return withLeadingSlash.replace(/\/+$/, "");
 }
 
 /** Resolve the project root supplied by Claude Code or the current shell. */
