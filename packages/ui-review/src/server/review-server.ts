@@ -51,7 +51,7 @@ export async function startReviewServer(options: ReviewServerOptions): Promise<R
   const target = await resolveTarget(options.target, appId, includeHash, basePath);
 
   const server = createServer((request, response) => {
-    void handleRequest(request, response, api, target);
+    void handleRequest(request, response, api, target, basePath);
   });
   if (target.kind === "upstream") {
     server.on("upgrade", (request, socket, head) => {
@@ -97,9 +97,18 @@ async function handleRequest(
   response: ServerResponse,
   api: ReviewApi,
   target: ResolvedTarget,
+  basePath: string,
 ): Promise<void> {
   try {
     const requestUrl = new URL(request.url ?? "/", "http://ui-review.local");
+    // Reaching the sub-path without a trailing slash (".../ports/4317") makes the browser resolve
+    // the app's relative URLs against the parent path, dropping the last segment. Redirect to the
+    // canonical ".../ports/4317/" so relative asset and API requests keep the full base path.
+    if (basePath !== "" && requestUrl.pathname === basePath) {
+      response.writeHead(301, { location: `${basePath}/${requestUrl.search}` });
+      response.end();
+      return;
+    }
     if (await api.handle(request, response, requestUrl)) {
       return;
     }
